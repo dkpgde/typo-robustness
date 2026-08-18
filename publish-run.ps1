@@ -117,8 +117,15 @@ if (-not $StagedPaths.Count) {
 }
 
 Write-Host "Latest completed run: $RunId"
-Write-Host 'Files to commit:'
-$StagedPaths | ForEach-Object { Write-Host "  $_" }
+Write-Host 'Git status after staging:'
+Invoke-Git -Arguments @('status', '--short')
+
+$Confirmation = (Read-Host 'Proceed with commit and push? [y/N]').Trim().ToLowerInvariant()
+if ($Confirmation -notin @('y', 'yes')) {
+    Invoke-Git -Arguments @('restore', '--staged', '--', '.')
+    Write-Host 'Cancelled. The changes staged by this script were unstaged.'
+    exit 0
+}
 
 Invoke-Git -Arguments @('commit', '-m', $Message)
 Invoke-Git -Arguments @('push', 'origin', $Branch)
