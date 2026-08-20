@@ -1,0 +1,2 @@
+test,metric,models,n_seeds,statistic,p_value,significant_0.05
+Friedman test,Mean relative Macro-F1 degradation,"bpe_500, bpe_1000, bpe_2000, bpe_5000",9,14.73333333333332,0.002059313819793412,True

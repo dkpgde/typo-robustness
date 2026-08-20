@@ -1,0 +1,2 @@
+family,test,metric,model_a,model_b,n_seeds,observed_mean_delta_a_minus_b,n_exact_permutations,p_raw,p_holm_family,significant_holm_0.05
+Word versus character,Exact paired sign-flip permutation test,Mean relative Macro-F1 degradation,word,char,9,0.019879086682164853,512,0.00390625,0.00390625,True

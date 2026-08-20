@@ -1,0 +1,5 @@
+family,test,metric,model_a,model_b,n_seeds,observed_mean_delta_a_minus_b,n_exact_permutations,p_raw,p_holm_family,significant_holm_0.05
+Word versus BPE,Exact paired sign-flip permutation test,Mean relative Macro-F1 degradation,word,bpe_500,9,0.010295755091149984,512,0.0078125,0.03125,True
+Word versus BPE,Exact paired sign-flip permutation test,Mean relative Macro-F1 degradation,word,bpe_1000,9,-0.006689358032956318,512,0.12109375,0.36328125,False
+Word versus BPE,Exact paired sign-flip permutation test,Mean relative Macro-F1 degradation,word,bpe_2000,9,-0.005259725171200182,512,0.18359375,0.3671875,False
+Word versus BPE,Exact paired sign-flip permutation test,Mean relative Macro-F1 degradation,word,bpe_5000,9,-0.00293071552687048,512,0.51953125,0.51953125,False

@@ -57,7 +57,14 @@ foreach ($ConfigFile in $ConfigFiles) {
     }
 
     $Config = Get-Content -LiteralPath $ConfigFile.FullName -Raw | ConvertFrom-Json
+    # Word and character models are always present; tokenizer variants are config-driven.
     $ExpectedModels = 2
+    if ($Config.bpe_vocab_sizes) {
+        $ExpectedModels += @($Config.bpe_vocab_sizes).Count
+    }
+    elseif ($null -ne $Config.subword_max_tokens) {
+        $ExpectedModels++
+    }
     $ExpectedMetricRows = $Config.training_seeds.Count * $Config.corruption_levels.Count * $ExpectedModels
     $ExpectedResourceRows = $Config.training_seeds.Count * $ExpectedModels
     $MetricRows = @(Import-Csv -LiteralPath (Join-Path $RepoRoot "results/metrics_$CandidateId.csv")).Count
