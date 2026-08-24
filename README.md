@@ -1,109 +1,218 @@
-# Typo Robustness: Word vs BPE vs Character Tokenization
+# Typo Robustness — Adaptive Tokenization Granularity
 
-This project is a controlled text-classification experiment comparing word-level, byte-level BPE subword, and character-level tokenization under typographical noise. The BPE models sweep vocabulary sizes to measure how subword granularity affects robustness.
+This repository studies how tokenization granularity affects text-classification robustness under typographical noise, and whether a compact system can **adapt representation granularity per input** when finer tokenization is worth its additional compute.
 
-**Research question:** When the model architecture and training data are held constant, how do word, BPE, and character tokenization compare as the typo rate increases, and how does BPE vocabulary size affect robustness?
+The project has two stages:
 
-The experiment was inspired by Chai et al.'s *Tokenization Falling Short: On Subword Robustness in Large Language Models*, which examines how tokenization makes language models sensitive to typographical and formatting variations.
+1. **v1 — fixed tokenizers:** controlled comparison of word, byte-level BPE and character tokenization under the same compact CNN.
+2. **v2 — adaptive tokenization:** leakage-safe routing between word, BPE-500 and character experts, plus a matched replication with one frozen compact TCN backbone.
 
-## Experiment
+The v2 contribution is the **robustness–compute trade-off**, not higher absolute accuracy or a larger model benchmark.
 
-The task is four-class news-topic classification on the AG News dataset. The notebook uses article descriptions only and creates balanced splits of 12,000 training, 2,000 validation, and 2,000 test examples.
+## Research questions
 
-Six 1D CNN classifiers use the same overall architecture—embedding, spatial dropout, convolution, global max pooling, dropout, and dense layers—but different input representations:
+**RQ1 — CNN:** Can observable tokenization instability predict when coarse tokenization will fail, allowing a compact router to adapt representation granularity to each input?
 
-- **Word model:** whitespace tokenization, a vocabulary capped at 5,000 tokens, and sequences of 69 tokens.
-- **BPE models:** byte-level BPE trained only on the training split, with vocabulary sizes of 500, 1,000, 2,000, and 5,000. Their respective sequence lengths are 206, 157, 126, and 99 tokens.
-- **Character model:** character tokenization, a vocabulary capped at 200 tokens, and sequences of 443 tokens.
+**RQ2 — TCN:** Do the same tokenization trade-offs, instability signals and adaptive-routing gains persist when the CNN is replaced by one prespecified compact TCN?
 
-The sequence lengths cover at least 99% of the training descriptions at their respective representation levels. All six models use 32-dimensional embeddings, 128 convolution filters, a kernel size of 5, and a 64-unit dense layer.
+## v1 baseline
 
-Each model is trained with nine seeds. At evaluation time, 0% to 50% of words are corrupted in five-percentage-point increments. A corrupted word receives an adjacent-character swap, QWERTY-neighbor substitution, deletion, or insertion, selected with equal probability. In addition, 7.5% of words of at least five characters receive a second, non-adjacent typo. The test sets are nested: increasing a corruption level retains the words corrupted at lower levels and adds more.
+The frozen baseline uses AG News descriptions only, with balanced splits of 12,000 training, 2,000 validation and 2,000 test examples.
 
-The notebook reports accuracy, macro precision, macro F1, Matthews correlation coefficient, log loss, training and inference resource use, paired McNemar tests with Holm correction, a Friedman omnibus test across BPE vocabulary sizes, and exact paired sign-flip tests of relative Macro-F1 degradation with Holm correction inside predefined comparison families.
+Six representations are compared under the same CNN concept:
 
-## Results
+- word tokenization;
+- BPE vocabularies of 500, 1,000, 2,000 and 5,000;
+- character tokenization.
 
-Results below are means across the nine training seeds from run `20260820_052447`. Mean relative degradation averages each seed's clean-to-corrupted Macro-F1 loss across all nonzero corruption levels.
+Each model is trained with nine seeds. Evaluation uses nested corruption levels from 0% to 50% of words. A corrupted word receives an adjacent-character swap, QWERTY-neighbor substitution, deletion or insertion. Resource use and paired statistical tests are recorded.
 
-| Model | Clean accuracy | Accuracy at 50% | Clean macro F1 | Macro F1 at 50% | F1 drop | Mean relative degradation |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Word | **85.14%** | 75.83% | **85.10%** | 75.80% | 9.30 pp | 4.72% |
-| BPE 500 | 80.90% | 73.91% | 80.80% | 73.84% | 6.96 pp | 3.69% |
-| BPE 1,000 | 81.54% | 72.21% | 81.47% | 72.13% | 9.34 pp | 5.39% |
-| BPE 2,000 | 82.83% | 73.05% | 82.76% | 72.82% | 9.94 pp | 5.25% |
-| BPE 5,000 | 84.01% | 74.74% | 83.96% | 74.64% | 9.33 pp | 5.02% |
-| Character | 80.92% | **76.38%** | 80.87% | **76.34%** | **4.53 pp** | **2.74%** |
+The committed v1 run `20260820_052447` shows the motivating trade-off:
 
-![Accuracy, Macro-F1, MCC, and log loss across corruption levels](figures/absolute_performance_20260820_052447.png)
+| Model | Clean Macro-F1 | Macro-F1 at 50% | Mean relative degradation |
+| --- | ---: | ---: | ---: |
+| Word | **85.10%** | 75.80% | 4.72% |
+| BPE-500 | 80.80% | 73.84% | 3.69% |
+| BPE-1,000 | 81.47% | 72.13% | 5.39% |
+| BPE-2,000 | 82.76% | 72.82% | 5.25% |
+| BPE-5,000 | 83.96% | 74.64% | 5.02% |
+| Character | 80.87% | **76.34%** | **2.74%** |
 
-The word model performs best on clean text, while the character model is the most robust and has the highest accuracy and Macro F1 at 50% corruption. The character model's mean relative Macro-F1 degradation is significantly lower than the word model's (`p = 0.0039`) and every BPE model's (Holm-adjusted `p = 0.0156` for each comparison).
+Word tokenization performs best on clean text; character tokenization is most robust but produces much longer sequences; BPE-500 is a useful intermediate point.
 
-Among the BPE models, vocabulary size has a significant overall effect on degradation (Friedman `p = 0.0021`). BPE 500 is more robust than BPE 1,000, 2,000, and 5,000 after Holm correction, although its clean-text performance is lower. It also degrades less than the word model (Holm-adjusted `p = 0.0312`); the other word-versus-BPE differences are not significant.
+## v2 protocol
 
-![Relative Macro-F1 degradation across corruption levels](figures/relative_degradation_20260820_052447.png)
+Final v2 results must be produced by:
 
-The comparison is architecture-controlled but not parameter- or compute-matched. Parameter counts range from 30,372 for the character model to 189,124 for the word and BPE 5,000 models. Smaller vocabularies reduce embedding parameters, while longer token sequences increase training and inference cost - most notably for the character model.
+```bash
+python run_v2_final.py --backbone cnn
+python run_v2_final.py --backbone tcn
+python compare_v2_authoritative.py
+```
+
+The exploratory `v2_*.ipynb` notebooks are retained for inspection but are **not authoritative for final reported numbers**.
+
+The complete protocol is documented in [`V2_METHODOLOGY.md`](V2_METHODOLOGY.md).
+
+### Leakage-safe router calibration
+
+The router is never fitted on final-test examples. Instead, the frozen v1 expert experiment remains unchanged and router calibration uses the next 500 otherwise-unused AG News training rows per class after the first 3,500 rows per class consumed by the v1 train/validation pool.
+
+This yields 2,000 disjoint calibration texts. Expert predictions on corrupted calibration examples define routing targets. Model seed is not a router feature.
+
+### Instability diagnostics
+
+Deployable features include:
+
+- word OOV rate;
+- BPE tokens per word and per character;
+- fractions of words split into 2+ and 3+ pieces;
+- maximum/mean pieces per word;
+- sequence-length statistics;
+- text, word and character length;
+- punctuation and digit ratios.
+
+For analysis only, paired clean/corrupted examples also receive `delta_fragmentation` and `delta_sequence_length`. Clean-counterpart information is never passed to a deployed router.
+
+Instability is tested against:
+
+1. word-model classification error;
+2. confidence degradation relative to the clean counterpart;
+3. the word-minus-character predictive-loss gap.
+
+### Adaptive routing
+
+The router chooses among:
+
+- **word**;
+- **BPE-500**;
+- **character**.
+
+For sample `i`, expert `m` and trade-off weight `lambda`, the oracle minimizes:
+
+```text
+cross_entropy(i, m) + lambda * measured_end_to_end_CPU_cost(m)
+```
+
+A separate router is trained for every predefined `lambda` value. Implemented router families are logistic regression, shallow decision tree and gradient boosting, plus a calibrated fragmentation-threshold router and the oracle.
+
+Routing regret is evaluated against the same lambda-penalized oracle objective.
+
+### Required baselines
+
+The final frontier contains:
+
+- word;
+- BPE-500;
+- BPE-5000;
+- character;
+- BPE-500 with BPE dropout;
+- fragmentation-threshold routing;
+- learned routing;
+- oracle routing.
+
+### True OOD holdout
+
+`substitution` is the prespecified corruption-family holdout. The OOD router is calibrated only on swap, deletion and insertion corruptions, then evaluated on substitution-only corruptions of the final test set.
+
+### Efficiency accounting
+
+The key v2 figure is:
+
+```text
+Macro-F1 vs measured end-to-end CPU latency per input
+```
+
+Fixed-expert latency includes tokenization/vectorization and model inference. Adaptive latency additionally includes instability-feature extraction and router inference.
+
+The repository also records:
+
+- active sequence length;
+- active parameter count;
+- resident system size;
+- inference peak RAM;
+- training time and training RAM;
+- routing allocation;
+- routing regret.
+
+### Statistical analysis
+
+Clean-relative Macro-F1 degradation is calculated per seed before aggregation. Learned logistic policies across the lambda sweep are compared with the best fixed representation using paired seed-level differences, 95% confidence intervals, Cohen's dz, exact paired sign-flip tests and Holm correction.
+
+A representative midpoint policy is additionally evaluated with paired McNemar tests and Holm correction on identical final-test rows and all nine seeds.
+
+## TCN replication
+
+The TCN branch uses one fixed compact same-padded dilated residual architecture with dilation schedule `(1, 2, 4)`. It repeats the same six fixed tokenizers, diagnostics, adaptive-routing protocol, BPE-dropout baseline, OOD holdout, efficiency accounting, statistics and failure analysis.
+
+There is no TCN architecture sweep. RQ2 asks whether the **mechanism replicates across backbones**, not whether TCN beats CNN in absolute performance.
+
+## Cross-backbone analysis
+
+`compare_v2_authoritative.py` compares matched qualitative conclusions and effect sizes and produces the two-panel CPU frontier.
+
+Granularity is ordered correctly from coarse to fine:
+
+```text
+word -> BPE-5000 -> BPE-2000 -> BPE-1000 -> BPE-500 -> character
+```
+
+Clean Macro-F1 is averaged across seeds rather than taking the first seed.
+
+## Repository layout
+
+```text
+Typo_tokenization.ipynb          Frozen v1 experiment
+common.py                        Shared frozen-v1 + v2 model/corruption machinery
+v2_methodology.py                Leakage-safe adaptive-routing/evaluation utilities
+run_v2_final.py                  Authoritative final CNN/TCN execution pipeline
+compare_v2_authoritative.py      Corrected CNN-vs-TCN comparison
+V2_METHODOLOGY.md                Detailed v2 protocol and methodological invariants
+v2_rq1_cnn_adaptive.ipynb        Exploratory RQ1 notebook
+v2_rq2_tcn_adaptive.ipynb        Exploratory RQ2 notebook
+v2_comparison_cnn_vs_tcn.ipynb   Exploratory comparison notebook
+results/                         Metrics, predictions, statistics and manifests
+artifacts/                       Models, tokenizers, configs and split artifacts
+figures/                         Generated figures
+```
 
 ## Replication
 
-1. Clone the repository and enter its directory.
-2. Use Python 3.12 to create and activate a virtual environment:
+Use Python 3.12 and install dependencies with:
 
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
+```bash
+python -m pip install -r requirements.txt
+```
 
-3. Install the Python dependencies:
+Download the AG News Classification Dataset and place `train.csv` and `test.csv` in `dataset/`.
 
-   ```powershell
-   python -m pip install -r requirements.txt
-   ```
+Run v1 with:
 
-4. Download the [AG News Classification Dataset from Kaggle](https://www.kaggle.com/datasets/amananandrai/ag-news-classification-dataset/data). Place `train.csv` and `test.csv` in `dataset/`.
-5. Create the output directories if they are not already present:
+```bash
+jupyter lab Typo_tokenization.ipynb
+```
 
-   ```powershell
-   New-Item -ItemType Directory -Force dataset, results/histories, artifacts/model_summaries, artifacts/models, figures | Out-Null
-   ```
+Run final v2 with the three commands shown above. Do not report v2 results until both run manifests contain:
 
-6. Start Jupyter and run every cell in the main notebook:
-
-   ```powershell
-   jupyter lab Typo_tokenization.ipynb
-   ```
-
-The configured seeds and deterministic TensorFlow operations make a run reproducible on the same software and hardware stack. Each run receives a timestamped ID and writes metrics, predictions, statistical tests, resource measurements, model files, vocabularies, training histories, and figures to `results/`, `artifacts/`, and `figures/`. CPU execution is intended given the small models.
+```json
+{"protocol": "v2_authoritative_leakage_safe"}
+```
 
 ## Technologies
 
-- Python 3.12 and Jupyter
-- TensorFlow and Keras
+- Python 3.12
+- TensorFlow / Keras
 - Hugging Face Tokenizers
 - NumPy and pandas
-- SciPy, scikit-learn, and statsmodels
-- Matplotlib and Seaborn
+- SciPy, scikit-learn and statsmodels
+- Matplotlib
 - psutil
-
-## Project layout
-
-```text
-Typo_tokenization.ipynb       Main experiment and executed analysis
-Typo_tokenization_test.ipynb  Development/test notebook
-dataset/                      AG News train/test CSV files (not committed)
-results/                      Metrics, predictions, statistical tests, and histories
-artifacts/                    Configs, split IDs, vocabularies, model summaries, and models
-figures/                      Generated plots
-```
-
-Dataset files and trained model files are excluded from version control; the notebook regenerates all result tables and figures.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
 
 ## References
 
-1. Aman Anand Rai. *[AG News Classification Dataset](https://www.kaggle.com/datasets/amananandrai/ag-news-classification-dataset/data).* Kaggle, Version 2.
-2. Yekun Chai, Yewei Fang, Qiwei Peng, and Xuhong Li. 2024. *[Tokenization Falling Short: On Subword Robustness in Large Language Models](https://aclanthology.org/2024.findings-emnlp.86/).* Findings of the Association for Computational Linguistics: EMNLP 2024, 1582–1599. Association for Computational Linguistics. [doi:10.18653/v1/2024.findings-emnlp.86](https://doi.org/10.18653/v1/2024.findings-emnlp.86).
+1. Aman Anand Rai. *AG News Classification Dataset*. Kaggle, Version 2.
+2. Yekun Chai, Yewei Fang, Qiwei Peng, and Xuhong Li. 2024. *Tokenization Falling Short: On Subword Robustness in Large Language Models*. Findings of EMNLP 2024, 1582–1599.
