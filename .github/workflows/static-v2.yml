@@ -1,0 +1,23 @@
+name: v2 static validation
+
+on:
+  push:
+    branches: [main, "fix/**"]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python sources
+        run: |
+          python -m py_compile v2_methodology.py run_v2_final.py compare_v2_authoritative.py common.py
+      - name: Validate notebook JSON
+        run: |
+          python -m json.tool v2_rq1_cnn_adaptive.ipynb >/dev/null
+          python -m json.tool v2_rq2_tcn_adaptive.ipynb >/dev/null
+          python -m json.tool v2_comparison_cnn_vs_tcn.ipynb >/dev/null
